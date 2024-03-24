@@ -1,0 +1,64 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "HealthCareAgentAssistant API",
+    "description": "API for getting patient information",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/getpatientinfo": {
+      "post": {
+        "description": "Get data for a patient by name",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Name of the patient",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response with patient data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatientData"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PatientData": {
+        "type": "object",
+        "description": "Patient data",
+        "properties": {
+          "patientName": {
+            "type": "string",
+            "description": "Patient name"
+          },
+          "dob": {
+            "type": "string",
+            "description": "Date of birth"
+          },
+          "address": {
+            "type": "string",
+            "description": "Address"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "description": "Phone number"
+          }
+        }
+      }
+    }
+  }
+}

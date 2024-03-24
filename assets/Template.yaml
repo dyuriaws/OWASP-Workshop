@@ -1,0 +1,175 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  UserAlias:
+    Type: String
+    Description: User Alias for creating unique AWS resources e.g. S3 bucket
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: VPC subnet with external connectivity for Cloud9 environment  
+
+Resources:
+  GenAIOWASPCloud9Environment:
+    Type: AWS::Cloud9::EnvironmentEC2
+    Properties:
+      Name: !Sub genai-owasp-env-${UserAlias}
+      InstanceType: t2.micro
+      ImageId: ubuntu-22.04-x86_64
+      SubnetId: !Ref SubnetId
+  GenAIOWASPS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub genai-owasp-s3-${UserAlias}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: true
+
+  GenAIOWASPS3BucketBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref GenAIOWASPS3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource:
+              - !Sub arn:aws:s3:::genai-owasp-s3-${UserAlias}
+              - !Sub arn:aws:s3:::genai-owasp-s3-${UserAlias}/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  GenAIOWASPDynamoDBAgentTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: healthcareagentinfo
+      AttributeDefinitions:
+        - AttributeName: name
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: name
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  GenAIOWASPDynamoDBPatientTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: healthcarepatientinfo
+      AttributeDefinitions:
+        - AttributeName: name
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: name
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  GenAIOWASPDynamoDBPhiTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: healthcarepatientphiinfo
+      AttributeDefinitions:
+        - AttributeName: name
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: name
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  HealthCareAgentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Healthcare Agent Lambda
+      Handler: HealthCareAgentLambda.lambda_handler
+      Role:
+        Fn::GetAtt:
+          - HealthCareLambdaRole
+          - Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import Database
+          import Avp
+          from Model import Patient, MedicalData, Agent
+          from Util import debug_object  
+
+      Runtime: python3.12
+      Timeout: 60
+
+  HealthCareLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-HealthCareLambdaPolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 
+                  !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:BatchGetItem
+                  - dynamodb:List*
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:Describe*
+                Resource:
+                  - Fn::GetAtt:
+                      - GenAIOWASPDynamoDBPhiTable
+                      - Arn
+                  - Fn::GetAtt:
+                      - GenAIOWASPDynamoDBPatientTable
+                      - Arn
+                  - Fn::GetAtt:
+                      - GenAIOWASPDynamoDBAgentTable
+                      - Arn    
+              - Effect: Allow
+                Action:
+                  - verifiedpermissions:IsAuthorized
+                Resource:
+                  !Sub arn:aws:verifiedpermissions::${AWS::AccountId}:policy-store/* 
+  
+  BedrockAgentResourePolicy:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+          - HealthCareAgentLambda
+          - Arn
+      Principal: bedrock.amazonaws.com
+      SourceArn:
+        Fn::Join:
+          - ""
+          - - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:agent/BedrockAgentID              
